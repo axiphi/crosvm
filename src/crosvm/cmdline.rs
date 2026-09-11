@@ -1215,6 +1215,8 @@ pub struct RunCommand {
     /// Possible key values:
     ///     backend=(2d|virglrenderer|gfxstream) - Which backend to
     ///        use for virtio-gpu (determining rendering protocol)
+    ///     gpu-path=PATH - The path to the host GPU render node for
+    ///        virglrenderer.
     ///     max-num-displays=INT - The maximum number of concurrent
     ///        virtual displays in this VM. This must not exceed
     ///        VIRTIO_GPU_MAX_SCANOUTS (i.e. 16).

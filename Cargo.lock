@@ -2123,9 +2123,9 @@ dependencies = [
 
 [[package]]
 name = "magma-gpu"
-version = "0.1.80"
+version = "0.1.85"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "002536499cb45b3509c179f42f8c48729364931668f5a2c1bef8c407addaa629"
+checksum = "c19b363d05adbb8ca246d50b7d8dcac70003f7f429b52beebe7ce0d51cb39fd7"
 dependencies = [
  "cfg-if",
  "libc",
@@ -2927,9 +2927,9 @@ dependencies = [
 
 [[package]]
 name = "rutabaga_gfx"
-version = "0.1.80"
+version = "0.1.85"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2817d168222af3c49269f583dd8e67429912953ae608f715fd97683ed50320a5"
+checksum = "52e4747a81e5e40e8f4b0d74bab0cadf675c9a470a3d75bad5989cd7c3a64fbe"
 dependencies = [
  "cfg-if",
  "libc",

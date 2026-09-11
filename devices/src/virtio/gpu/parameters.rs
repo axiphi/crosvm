@@ -51,6 +51,7 @@ pub enum AudioDeviceMode {
 pub struct GpuParameters {
     #[serde(rename = "backend")]
     pub mode: GpuMode,
+    pub gpu_path: Option<PathBuf>,
     #[serde(default = "default_max_num_displays")]
     pub max_num_displays: u32,
     #[serde(default = "default_audio_device_mode")]
@@ -109,6 +110,7 @@ impl Default for GpuParameters {
             renderer_use_surfaceless: true,
             use_vulkan: None,
             mode: Default::default(),
+            gpu_path: None,
             wsi: None,
             cache_path: None,
             cache_size: None,

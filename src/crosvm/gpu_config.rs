@@ -204,6 +204,16 @@ mod tests {
     }
 
     #[test]
+    fn parse_gpu_options_gpu_path() {
+        let gpu_params = parse_gpu_options(
+            "backend=virglrenderer,context-types=drm,gpu-path=/dev/dri/renderD128,\
+             displays=[[mode=windowed[1920,1080],refresh-rate=60]]",
+        )
+        .unwrap();
+        assert_eq!(gpu_params.gpu_path, Some("/dev/dri/renderD128".into()));
+    }
+
+    #[test]
     fn parse_gpu_options_flags() {
         macro_rules! assert_default {
             ($p:ident.$a:ident) => {

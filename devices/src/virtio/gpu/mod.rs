@@ -1483,6 +1483,12 @@ impl Gpu {
         }
 
         let mut rutabaga_paths: Vec<RutabagaPath> = Vec::new();
+        if let Some(path) = &gpu_parameters.gpu_path {
+            rutabaga_paths.push(RutabagaPath {
+                path: path.clone(),
+                path_type: RUTABAGA_PATH_TYPE_GPU,
+            });
+        }
         for (name, path) in paths {
             match &name[..] {
                 "" => rutabaga_paths.push(RutabagaPath {
