@@ -475,6 +475,7 @@ impl VirtioGpuScanout {
         };
         let dmabuf = to_safe_descriptor(handle.os_handle);
 
+        let resource_info = rutabaga.resource3d_info(resource.resource_id).ok();
         let (width, height, format, stride, offset, modifier) = match resource.scanout_data {
             Some(data) => (
                 data.width,
@@ -482,10 +483,10 @@ impl VirtioGpuScanout {
                 data.drm_format,
                 data.strides[0],
                 data.offsets[0],
-                0,
+                resource_info.map_or(0, |info| info.modifier),
             ),
             None => {
-                let query = rutabaga.resource3d_info(resource.resource_id).ok()?;
+                let query = resource_info?;
                 (
                     resource.width,
                     resource.height,
