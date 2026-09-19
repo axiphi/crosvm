@@ -46,11 +46,9 @@ pub(crate) fn validate_gpu_config(cfg: &mut Config) -> Result<(), String> {
             ));
         }
 
-        if gpu_parameters.max_num_displays < 1
-            || gpu_parameters.max_num_displays > VIRTIO_GPU_MAX_SCANOUTS as u32
-        {
+        if gpu_parameters.max_num_displays > VIRTIO_GPU_MAX_SCANOUTS as u32 {
             return Err(format!(
-                "`max_num_displays` must be in range [1, {VIRTIO_GPU_MAX_SCANOUTS}]"
+                "`max_num_displays` must be in range [0, {VIRTIO_GPU_MAX_SCANOUTS}]"
             ));
         }
         if gpu_parameters.display_params.len() as u32 > gpu_parameters.max_num_displays {
@@ -59,11 +57,6 @@ pub(crate) fn validate_gpu_config(cfg: &mut Config) -> Result<(), String> {
                 gpu_parameters.display_params.len(),
                 gpu_parameters.max_num_displays
             ));
-        }
-
-        // Add a default display if no display is specified.
-        if gpu_parameters.display_params.is_empty() {
-            gpu_parameters.display_params.push(Default::default());
         }
 
         let is_4k_uhd_enabled = false;

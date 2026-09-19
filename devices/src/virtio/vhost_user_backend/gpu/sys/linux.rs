@@ -178,12 +178,6 @@ pub fn run_gpu_device(opts: Options) -> anyhow::Result<()> {
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
 
-    if gpu_parameters.display_params.is_empty() {
-        gpu_parameters
-            .display_params
-            .push(GpuDisplayParameters::default());
-    }
-
     let ex = Executor::new().context("failed to create executor")?;
 
     // We don't know the order in which other devices are going to connect to the resource bridges

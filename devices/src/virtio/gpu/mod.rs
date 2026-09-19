@@ -932,7 +932,10 @@ fn build_rutabaga(
     rutabaga_server_descriptor: Option<RutabagaDescriptor>,
     fence_handler: RutabagaFenceHandler,
 ) -> RutabagaResult<Rutabaga> {
-    let (display_width, display_height) = display_params[0].get_virtual_display_size();
+    let (display_width, display_height) = display_params
+        .first()
+        .map(|p| p.get_virtual_display_size())
+        .unwrap_or((0, 0));
 
     // Only allow virglrenderer to fork its own render server when explicitly requested.
     // Caller can enforce its own restrictions (e.g. not allowed when sandboxed) and set the
@@ -1478,7 +1481,7 @@ impl Gpu {
         #[cfg(any(target_os = "android", target_os = "linux"))] gpu_cgroup_path: Option<&PathBuf>,
     ) -> Gpu {
         let mut display_params = gpu_parameters.display_params.clone();
-        if display_params.is_empty() {
+        if display_params.is_empty() && gpu_parameters.max_num_displays > 0 {
             display_params.push(Default::default());
         }
 
@@ -1749,7 +1752,7 @@ impl Gpu {
         virtio_gpu_config {
             events_read: Le32::from(events_read),
             events_clear: Le32::from(0),
-            num_scanouts: Le32::from(VIRTIO_GPU_MAX_SCANOUTS as u32),
+            num_scanouts: Le32::from(if self.gpu_parameters.max_num_displays == 0 { 0 } else { VIRTIO_GPU_MAX_SCANOUTS as u32 }),
             num_capsets: Le32::from(num_capsets),
         }
     }
