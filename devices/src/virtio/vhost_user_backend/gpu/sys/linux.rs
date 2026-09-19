@@ -217,11 +217,13 @@ pub fn run_gpu_device(opts: Options) -> anyhow::Result<()> {
     let (gpu_control_tube, _) = Tube::pair().context("failed to create gpu control tube")?;
 
     let mut display_backends = vec![
-        virtio::DisplayBackend::X(x_display),
-        virtio::DisplayBackend::Stub,
+        virtio::DisplayBackend::Stub
     ];
-    if let Some(p) = channels.get("") {
-        display_backends.insert(0, virtio::DisplayBackend::Wayland(Some(p.to_owned())));
+    if gpu_parameters.max_num_displays > 0 {
+        display_backends.insert(0, virtio::DisplayBackend::X(x_display));
+        if let Some(p) = channels.get("") {
+            display_backends.insert(0, virtio::DisplayBackend::Wayland(Some(p.to_owned())));
+        }
     }
 
     // These are only used when there is an input device.

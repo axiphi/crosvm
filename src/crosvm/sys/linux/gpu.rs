@@ -125,21 +125,23 @@ pub fn create_gpu_device(
         gpu_params.allow_implicit_render_server_exec && !is_sandboxed;
 
     let mut display_backends = vec![
-        virtio::DisplayBackend::X(cfg.x_display.clone()),
-        virtio::DisplayBackend::Stub,
+        virtio::DisplayBackend::Stub
     ];
+    if gpu_params.max_num_displays > 0 {
+        display_backends.insert(0, virtio::DisplayBackend::X(cfg.x_display.clone()));
 
-    #[cfg(feature = "android_display")]
-    if let Some(service_name) = &cfg.android_display_service {
-        display_backends.insert(0, virtio::DisplayBackend::Android(service_name.to_string()));
-    }
+        #[cfg(feature = "android_display")]
+        if let Some(service_name) = &cfg.android_display_service {
+            display_backends.insert(0, virtio::DisplayBackend::Android(service_name.to_string()));
+        }
 
-    // Use the unnamed socket for GPU display screens.
-    if let Some(socket_path) = cfg.wayland_socket_paths.get("") {
-        display_backends.insert(
-            0,
-            virtio::DisplayBackend::Wayland(Some(socket_path.to_owned())),
-        );
+        // Use the unnamed socket for GPU display screens.
+        if let Some(socket_path) = cfg.wayland_socket_paths.get("") {
+            display_backends.insert(
+                0,
+                virtio::DisplayBackend::Wayland(Some(socket_path.to_owned())),
+            );
+        }
     }
 
     let dev = virtio::Gpu::new(
