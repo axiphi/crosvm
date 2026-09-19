@@ -319,6 +319,8 @@ gfxstream_display = ["gpu_display/gfxstream_display"]
 ## Enables 3D acceleration for the guest via the virglrenderer library over virtio-gpu.
 virgl_renderer = ["devices/virgl_renderer"]
 
+rocm = ["virgl_renderer", "rutabaga_gfx/rocm"]
+
 ## Enables the usage of Vulkan for display on the host.
 vulkan_display = ["gpu_display/vulkan_display"]
 
