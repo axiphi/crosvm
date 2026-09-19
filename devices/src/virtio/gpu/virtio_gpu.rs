@@ -1174,12 +1174,6 @@ impl VirtioGpu {
             .with_context(|| format!("can't find the resource with id {resource_id}"))
             .context(ErrInvalidResourceId)?;
 
-        let map_info = self
-            .rutabaga
-            .map_info(resource_id)
-            .context("failed to retrieve the map info for the resource")
-            .context(ErrUnspec)?;
-
         let mut source: Option<VmMemorySource> = None;
         if let Ok(export) = self.rutabaga.export_blob(resource_id) {
             let export = RutabagaMagmaHandle::try_from(export)
@@ -1224,6 +1218,21 @@ impl VirtioGpu {
                 ptr: mapping.ptr,
                 size: mapping.size,
             });
+        };
+
+        let map_info = match self.rutabaga.map_info(resource_id) {
+            Ok(map_info) => map_info,
+            Err(_) if resource.rutabaga_external_mapping => {
+                // Match QEMU's behavior for virgl resources that are mappable but
+                // don't provide cache information. Cache NONE is zero.
+                RUTABAGA_MAP_ACCESS_RW
+            }
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "failed to retrieve the map info for the resource: {e}"
+                ))
+                .context(ErrUnspec);
+            }
         };
 
         let prot = match map_info & RUTABAGA_MAP_ACCESS_MASK {
