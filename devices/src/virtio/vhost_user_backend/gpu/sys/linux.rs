@@ -281,12 +281,6 @@ pub fn run_gpu_device(opts: Options) -> anyhow::Result<()> {
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
 
-    if gpu_parameters.display_params.is_empty() {
-        gpu_parameters
-            .display_params
-            .push(GpuDisplayParameters::default());
-    }
-
     let ex = Executor::new().context("failed to create executor")?;
 
     // We don't know the order in which other devices are going to connect to the resource bridges
@@ -325,16 +319,16 @@ pub fn run_gpu_device(opts: Options) -> anyhow::Result<()> {
 
     let (gpu_control_tube, _) = Tube::pair().context("failed to create gpu control tube")?;
 
-    let mut display_backends = vec![
-        virtio::DisplayBackend::X(x_display),
-        virtio::DisplayBackend::Stub,
-    ];
-    #[cfg(feature = "android_display")]
-    if let Some(service_name) = &gpu_parameters.android_display_service {
-        display_backends.insert(0, virtio::DisplayBackend::Android(service_name.to_string()));
-    }
-    if let Some(p) = channels.get("") {
-        display_backends.insert(0, virtio::DisplayBackend::Wayland(Some(p.to_owned())));
+    let mut display_backends = vec![virtio::DisplayBackend::Stub];
+    if gpu_parameters.max_num_displays > 0 {
+        display_backends.insert(0, virtio::DisplayBackend::X(x_display));
+        #[cfg(feature = "android_display")]
+        if let Some(service_name) = &gpu_parameters.android_display_service {
+            display_backends.insert(0, virtio::DisplayBackend::Android(service_name.to_string()));
+        }
+        if let Some(p) = channels.get("") {
+            display_backends.insert(0, virtio::DisplayBackend::Wayland(Some(p.to_owned())));
+        }
     }
 
     // These are only used when there is an input device.

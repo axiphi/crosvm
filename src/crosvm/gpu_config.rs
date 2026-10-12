@@ -46,11 +46,9 @@ pub(crate) fn validate_gpu_config(cfg: &mut Config) -> Result<(), String> {
             ));
         }
 
-        if gpu_parameters.max_num_displays < 1
-            || gpu_parameters.max_num_displays > VIRTIO_GPU_MAX_SCANOUTS as u32
-        {
+        if gpu_parameters.max_num_displays > VIRTIO_GPU_MAX_SCANOUTS as u32 {
             return Err(format!(
-                "`max_num_displays` must be in range [1, {VIRTIO_GPU_MAX_SCANOUTS}]"
+                "`max_num_displays` must be in range [0, {VIRTIO_GPU_MAX_SCANOUTS}]"
             ));
         }
         if gpu_parameters.display_params.len() as u32 > gpu_parameters.max_num_displays {
@@ -61,14 +59,13 @@ pub(crate) fn validate_gpu_config(cfg: &mut Config) -> Result<(), String> {
             ));
         }
 
-        // Add a default display if no display is specified.
-        if gpu_parameters.display_params.is_empty() {
-            gpu_parameters.display_params.push(Default::default());
-        }
-
         let is_4k_uhd_enabled = false;
-        let (width, height) =
-            gpu_parameters.display_params[0].get_virtual_display_size_4k_uhd(is_4k_uhd_enabled);
+        let (width, height) = gpu_parameters
+            .display_params
+            .first()
+            .map_or((0, 0), |params| {
+                params.get_virtual_display_size_4k_uhd(is_4k_uhd_enabled)
+            });
         cfg.display_input_width = Some(width);
         cfg.display_input_height = Some(height);
     }
@@ -112,12 +109,17 @@ mod tests {
             assert_eq!(gpu_params.max_num_displays, 5);
         }
         {
-            let command = crate::crosvm::cmdline::RunCommand::from_args(
+            let config: Config = crate::crosvm::cmdline::RunCommand::from_args(
                 &[],
                 &["--gpu", "max-num-displays=0", "/dev/null"],
             )
+            .unwrap()
+            .try_into()
             .unwrap();
-            assert!(Config::try_from(command).is_err());
+
+            let gpu_params = config.gpu_parameters.unwrap();
+            assert_eq!(gpu_params.max_num_displays, 0);
+            assert!(gpu_params.display_params.is_empty());
         }
         {
             let command = crate::crosvm::cmdline::RunCommand::from_args(
