@@ -8,9 +8,9 @@ cfg_if::cfg_if! {
         use devices::parse_wayland_sock;
 
         use crate::crosvm::sys::config::parse_pmem_ext2_option;
-        use crate::crosvm::sys::config::VfioOption;
         use crate::crosvm::sys::config::SharedDir;
-        use crate::crosvm::sys::config::PmemExt2Option;
+        use crate::crosvm::sys::config::VfioOption;
+        use device_virtio_pmem::PmemExt2Option;
     }
 }
 
@@ -46,6 +46,8 @@ use device_virtio_block::DiskOption;
 use device_virtio_net::NetParameters;
 #[cfg(all(unix, feature = "net"))]
 use device_virtio_net::NetParametersMode;
+#[cfg(any(target_os = "android", target_os = "linux"))]
+use device_virtio_pmem::PmemOption;
 use device_virtio_scsi::ScsiOption;
 #[cfg(feature = "audio")]
 use device_virtio_snd::parameters::Parameters as SndParameters;
@@ -77,7 +79,6 @@ use serde_keyvalue::FromKeyValues;
 use vendor_devices::VendorDeviceModule;
 use vm_memory::FileBackedMappingParameters;
 
-use super::config::PmemOption;
 #[cfg(feature = "gpu")]
 use super::gpu_config::fixup_gpu_options;
 #[cfg(all(unix, feature = "gpu"))]
@@ -1626,6 +1627,7 @@ pub struct RunCommand {
     /// path to empty directory to use for sandbox pivot root
     pub pivot_root: Option<PathBuf>,
 
+    #[cfg(any(target_os = "android", target_os = "linux"))]
     #[argh(option)]
     /// parameters for setting up a virtio-pmem device.
     /// Valid keys:
@@ -1645,6 +1647,7 @@ pub struct RunCommand {
     ///        out by crosvm
     pub pmem: Vec<PmemOption>,
 
+    #[cfg(any(target_os = "android", target_os = "linux"))]
     #[argh(option, arg_name = "PATH")]
     /// (DEPRECATED): Use --pmem.
     /// path to a disk image
@@ -1759,6 +1762,7 @@ pub struct RunCommand {
     /// comma-separated list of CPUs or CPU ranges to run VCPUs on. (e.g. 0,1-3,5) (default: none)
     pub rt_cpus: Option<CpuSet>,
 
+    #[cfg(any(target_os = "android", target_os = "linux"))]
     #[argh(option, arg_name = "PATH")]
     /// (DEPRECATED): Use --pmem.
     /// path to a writable disk image
@@ -2059,6 +2063,12 @@ pub struct RunCommand {
     #[argh(option, arg_name = "PATH")]
     /// path to a socket from where to read switch input events and write status updates to
     pub switches: Vec<PathBuf>,
+
+    #[cfg(feature = "vtpm")]
+    #[argh(option, arg_name = "PATH")]
+    /// path to a swtpm (https://github.com/stefanberger/swtpm) socket.
+    /// Works on any Linux host, not just ChromeOS.
+    pub swtpm_socket: Option<PathBuf>,
 
     #[argh(option, arg_name = "TAG")]
     /// (DEPRECATED): Use --syslog-tag before "run".
@@ -2444,12 +2454,14 @@ impl TryFrom<RunCommand> for super::config::Config {
 
         #[cfg(target_arch = "aarch64")]
         {
-            if cfg.mte.might_be_enabled()
-                && !(cmd.pmem.is_empty()
-                    && cmd.pmem_device.is_empty()
-                    && cmd.pstore.is_none()
-                    && cmd.rw_pmem_device.is_empty())
-            {
+            #[cfg(any(target_os = "android", target_os = "linux"))]
+            let has_pmem = !cmd.pmem.is_empty()
+                || !cmd.pmem_device.is_empty()
+                || !cmd.rw_pmem_device.is_empty();
+            #[cfg(not(any(target_os = "android", target_os = "linux")))]
+            let has_pmem = false;
+
+            if cfg.mte.might_be_enabled() && (has_pmem || cmd.pstore.is_some()) {
                 return Err(
                     "MTE cannot be enabled together with --pstore or pmem flags".to_string()
                 );
@@ -2587,29 +2599,38 @@ impl TryFrom<RunCommand> for super::config::Config {
             }
         }
 
-        cfg.pmems = cmd.pmem;
+        #[cfg(any(target_os = "android", target_os = "linux"))]
+        let pmem_devices = {
+            let mut pmem_devices = cmd.pmem;
 
-        if !cmd.pmem_device.is_empty() || !cmd.rw_pmem_device.is_empty() {
-            log::warn!(
-                "--pmem-device and --rw-pmem-device are deprecated. Please use --pmem instead."
-            );
-        }
+            if !cmd.pmem_device.is_empty() || !cmd.rw_pmem_device.is_empty() {
+                log::warn!(
+                    "--pmem-device and --rw-pmem-device are deprecated. Please use --pmem instead."
+                );
+            }
 
-        // Convert the deprecated `pmem_device` and `rw_pmem_device` into `pmem_devices`.
-        for disk_option in cmd.pmem_device.into_iter() {
-            cfg.pmems.push(PmemOption {
-                path: disk_option.path,
-                ro: true, // read-only
-                ..PmemOption::default()
-            });
-        }
-        for disk_option in cmd.rw_pmem_device.into_iter() {
-            cfg.pmems.push(PmemOption {
-                path: disk_option.path,
-                ro: false, // writable
-                ..PmemOption::default()
-            });
-        }
+            // Convert the deprecated `pmem_device` and `rw_pmem_device` into `pmem_devices`.
+            for disk_option in cmd.pmem_device.into_iter() {
+                pmem_devices.push(PmemOption {
+                    path: disk_option.path,
+                    ro: true, // read-only
+                    ..PmemOption::default()
+                });
+            }
+            for disk_option in cmd.rw_pmem_device.into_iter() {
+                pmem_devices.push(PmemOption {
+                    path: disk_option.path,
+                    ro: false, // writable
+                    ..PmemOption::default()
+                });
+            }
+
+            for pmem in &pmem_devices {
+                device_virtio_pmem::validate_pmem(pmem)?;
+            }
+
+            pmem_devices
+        };
 
         // Find the device to use as the kernel `root=` parameter. There can only be one.
         let virtio_blk_root_devs = disks
@@ -2625,12 +2646,15 @@ impl TryFrom<RunCommand> for super::config::Config {
             .filter(|(_, s)| s.root)
             .map(|(i, s)| (format_disk_letter("/dev/sd", i), s.read_only));
 
-        let virtio_pmem_root_devs = cfg
-            .pmems
+        #[cfg(any(target_os = "android", target_os = "linux"))]
+        let virtio_pmem_root_devs = pmem_devices
             .iter()
             .enumerate()
             .filter(|(_, p)| p.root)
             .map(|(i, p)| (format!("/dev/pmem{i}"), p.ro));
+
+        #[cfg(not(any(target_os = "android", target_os = "linux")))]
+        let virtio_pmem_root_devs = std::iter::empty();
 
         let mut root_devs = virtio_blk_root_devs
             .chain(virtio_scsi_root_devs)
@@ -2649,14 +2673,26 @@ impl TryFrom<RunCommand> for super::config::Config {
             }
         }
 
+        #[cfg(any(target_os = "android", target_os = "linux"))]
+        for (index, pmem_option) in pmem_devices.into_iter().enumerate() {
+            cfg.virtio_device_modules
+                .push(device_virtio_pmem::VirtioPmemModule { pmem_option, index }.into());
+        }
+
         if !cmd.scsi_block.is_empty() {
             cfg.virtio_device_modules
                 .push(device_virtio_scsi::VirtioScsiModule::new(cmd.scsi_block).into());
         }
 
         #[cfg(any(target_os = "android", target_os = "linux"))]
-        {
-            cfg.pmem_ext2 = cmd.pmem_ext2;
+        for (index, pmem_ext2_option) in cmd.pmem_ext2.into_iter().enumerate() {
+            cfg.virtio_device_modules.push(
+                device_virtio_pmem::VirtioPmemExt2Module {
+                    pmem_ext2_option,
+                    index,
+                }
+                .into(),
+            );
         }
 
         #[cfg(feature = "pvclock")]
@@ -2782,9 +2818,17 @@ impl TryFrom<RunCommand> for super::config::Config {
 
         #[cfg(feature = "vtpm")]
         {
+            if cmd.vtpm_proxy.unwrap_or_default() && cmd.swtpm_socket.is_some() {
+                return Err("cannot specify both --vtpm-proxy and --swtpm-socket".to_string());
+            }
             if cmd.vtpm_proxy.unwrap_or_default() {
                 cfg.virtio_device_modules
                     .push(device_virtio_tpm::VirtioTpmModule::new().into());
+            }
+            if let Some(socket_path) = cmd.swtpm_socket {
+                cfg.virtio_device_modules.push(
+                    device_virtio_tpm::VirtioTpmModule::with_swtpm_socket(socket_path).into(),
+                );
             }
         }
 
@@ -3105,7 +3149,37 @@ impl TryFrom<RunCommand> for super::config::Config {
 
         #[cfg(any(target_os = "android", target_os = "linux"))]
         {
-            cfg.shared_dirs = cmd.shared_dir;
+            for shared_dir in cmd.shared_dir {
+                use crate::crosvm::sys::config::SharedDirKind;
+                match shared_dir.kind {
+                    SharedDirKind::FS => {
+                        cfg.virtio_device_modules.push(
+                            device_virtio_fs::VirtioFsModule {
+                                src: shared_dir.src,
+                                tag: shared_dir.tag,
+                                ugid: shared_dir.ugid,
+                                uid_map: shared_dir.uid_map,
+                                gid_map: shared_dir.gid_map,
+                                cfg: shared_dir.fs_cfg,
+                            }
+                            .into(),
+                        );
+                    }
+                    SharedDirKind::P9 => {
+                        cfg.virtio_device_modules.push(
+                            device_virtio_9p::Virtio9pModule {
+                                src: shared_dir.src,
+                                tag: shared_dir.tag,
+                                ugid: shared_dir.ugid,
+                                uid_map: shared_dir.uid_map,
+                                gid_map: shared_dir.gid_map,
+                                p9_cfg: shared_dir.p9_cfg,
+                            }
+                            .into(),
+                        );
+                    }
+                }
+            }
 
             cfg.coiommu_param = cmd.coiommu;
 
