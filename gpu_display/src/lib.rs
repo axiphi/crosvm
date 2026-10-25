@@ -60,6 +60,9 @@ pub use sys::SysGpuDisplayExt;
 #[cfg(feature = "vulkan_display")]
 const VK_UUID_BYTES: usize = 16;
 
+pub const DRM_FORMAT_MOD_LINEAR: u64 = 0;
+pub const DRM_FORMAT_MOD_INVALID: u64 = 0x00ff_ffff_ffff_ffff;
+
 #[derive(Clone)]
 pub struct VulkanCreateParams {
     #[cfg(feature = "vulkan_display")]

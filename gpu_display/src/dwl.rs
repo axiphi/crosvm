@@ -177,3 +177,10 @@ extern "C" {
 extern "C" {
     pub fn dwl_surface_set_scanout_id(self_: *mut dwl_surface, scanout_id: u32);
 }
+extern "C" {
+    pub fn dwl_context_supports_dmabuf(
+        self_: *const dwl_context,
+        fourcc: u32,
+        modifier: u64,
+    ) -> bool;
+}

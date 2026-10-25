@@ -36,6 +36,8 @@
 #define MAX_BUFFER_COUNT 64
 #define EVENT_BUF_SIZE 256
 
+const uint64_t DRM_FORMAT_MOD_INVALID = 0x00ffffffffffffffULL;
+
 const int32_t DWL_KEYBOARD_KEY_STATE_RELEASED = WL_KEYBOARD_KEY_STATE_RELEASED;
 const int32_t DWL_KEYBOARD_KEY_STATE_PRESSED  = WL_KEYBOARD_KEY_STATE_PRESSED;
 
@@ -100,6 +102,7 @@ struct dwl_context {
 	struct wl_display *display;
 	struct dwl_surface *surfaces[MAX_BUFFER_COUNT];
 	struct dwl_dmabuf *dmabufs[MAX_BUFFER_COUNT];
+	struct wl_array dmabuf_formats;
 	struct interfaces ifaces;
 	struct input input;
 	bool output_added;
@@ -608,9 +611,10 @@ static void registry_global(void *data, struct wl_registry *registry,
 		ifaces->aura = (struct zaura_shell *)wl_registry_bind(
 		    registry, id, &zaura_shell_interface, 6);
 	} else if (strcmp(interface, "zwp_linux_dmabuf_v1") == 0) {
-		ifaces->linux_dmabuf =
-		    (struct zwp_linux_dmabuf_v1 *)wl_registry_bind(
-			registry, id, &zwp_linux_dmabuf_v1_interface, 1);
+		// Most modern compositors support version 3.
+		uint32_t dmabuf_version = version < 3 ? version : 3;
+		ifaces->linux_dmabuf = (struct zwp_linux_dmabuf_v1 *)wl_registry_bind(
+			registry, id, &zwp_linux_dmabuf_v1_interface, dmabuf_version);
 	} else if (strcmp(interface, xdg_wm_base_interface.name) == 0) {
 		ifaces->xdg_wm_base = (struct xdg_wm_base *)wl_registry_bind(
 		    registry, id, &xdg_wm_base_interface, 1);
@@ -720,11 +724,78 @@ static void error_callback_stub(const char *message) {
 	(void)message;
 }
 
+struct dmabuf_format_modifier {
+	uint32_t fourcc;
+	uint64_t modifier;
+};
+
+bool dwl_context_supports_dmabuf(struct dwl_context *ctx, uint32_t fourcc,
+			  uint64_t modifier)
+{
+	struct dmabuf_format_modifier *entry;
+	wl_array_for_each(entry, &ctx->dmabuf_formats) {
+		if (entry->fourcc != fourcc)
+			continue;
+
+		// Before version 3, only format support is advertised.
+		if (zwp_linux_dmabuf_v1_get_version(ctx->ifaces.linux_dmabuf) < 3)
+			return true;
+
+		if (entry->modifier == modifier)
+			return true;
+	}
+	return false;
+}
+
+static void dmabuf_store_format(struct dwl_context *ctx, uint32_t fourcc,
+			  uint64_t modifier)
+{
+	if (dwl_context_supports_dmabuf(ctx, fourcc, modifier))
+		return;
+
+	struct dmabuf_format_modifier *entry =
+		wl_array_add(&ctx->dmabuf_formats, sizeof(*entry));
+
+	if (!entry) {
+		ctx->error_callback("failed to store dmabuf format/modifier");
+		return;
+	}
+
+	entry->fourcc = fourcc;
+	entry->modifier = modifier;
+}
+
+static void dmabuf_format(void *data, struct zwp_linux_dmabuf_v1 *dmabuf,
+			  uint32_t format)
+{
+	// For versions >= 3, use modifier events instead.
+	if (zwp_linux_dmabuf_v1_get_version(dmabuf) >= 3)
+		return;
+
+	dmabuf_store_format(data, format, DRM_FORMAT_MOD_INVALID);
+}
+
+static void dmabuf_modifier(void *data, struct zwp_linux_dmabuf_v1 *dmabuf,
+			  uint32_t format, uint32_t modifier_hi, uint32_t modifier_lo)
+{
+	(void)dmabuf;
+
+	uint64_t modifier = ((uint64_t)modifier_hi << 32) | modifier_lo;
+
+	dmabuf_store_format(data, format, modifier);
+}
+
+static const struct zwp_linux_dmabuf_v1_listener dmabuf_listener = {
+	.format = dmabuf_format,
+	.modifier = dmabuf_modifier,
+};
+
 struct dwl_context *dwl_context_new(dwl_error_callback_type error_callback)
 {
 	struct dwl_context *ctx = calloc(1, sizeof(struct dwl_context));
 	if (!ctx)
 		return NULL;
+	wl_array_init(&ctx->dmabuf_formats);
 	ctx->ifaces.context = ctx;
 	ctx->error_callback = error_callback ? error_callback : error_callback_stub;
 	return ctx;
@@ -734,6 +805,7 @@ void dwl_context_destroy(struct dwl_context **self)
 {
 	if ((*self)->display)
 		wl_display_disconnect((*self)->display);
+	wl_array_release(&(*self)->dmabuf_formats);
 	free(*self);
 	*self = NULL;
 }
@@ -756,8 +828,18 @@ bool dwl_context_setup(struct dwl_context *self, const char *socket_path)
 
 	struct interfaces *ifaces = &self->ifaces;
 	wl_registry_add_listener(registry, &registry_listener, ifaces);
-	wl_display_roundtrip(display);
+
+	if (wl_display_roundtrip(display) < 0)
+		goto fail;
+
 	dwl_context_output_get_aura(self);
+	if (ifaces->linux_dmabuf)
+		zwp_linux_dmabuf_v1_add_listener(ifaces->linux_dmabuf,
+			&dmabuf_listener, self);
+
+	// Second roundtrip, so supported format-modifier pairs are populated.
+	if (wl_display_roundtrip(display) < 0)
+		goto fail;
 
 	if (!ifaces->shm) {
 		self->error_callback("missing interface shm");

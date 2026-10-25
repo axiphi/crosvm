@@ -47,6 +47,8 @@ use crate::GpuDisplaySurface;
 use crate::SemaphoreTimepoint;
 use crate::SurfaceType;
 use crate::SysDisplayT;
+use crate::DRM_FORMAT_MOD_INVALID;
+use crate::DRM_FORMAT_MOD_LINEAR;
 
 const BUFFER_COUNT: usize = 3;
 const BYTES_PER_PIXEL: u32 = 4;
@@ -456,6 +458,25 @@ impl DisplayT for DisplayWl {
         } = external_display_resource
         {
             // SAFETY:
+            // Safe given that the context pointer is valid.
+            // The other parameters are always handled safely.
+            let modifiers_supported =
+                unsafe { dwl_context_supports_dmabuf(self.ctx(), fourcc, modifiers) };
+
+            let resolved_modifiers = if modifiers_supported {
+                modifiers
+            } else if modifiers == DRM_FORMAT_MOD_INVALID
+                // SAFETY: The context pointer is valid, as above.
+                && unsafe { dwl_context_supports_dmabuf(self.ctx(), fourcc, DRM_FORMAT_MOD_LINEAR) }
+            {
+                // Preserve the previous linear interpretation of scanout blobs when the
+                // compositor cannot import an implicit layout, as with Vulkan renderers.
+                DRM_FORMAT_MOD_LINEAR
+            } else {
+                bail!("Compositor doesn't support the dmabuf format/modifier pair.");
+            };
+
+            // SAFETY:
             // Safe given that the context pointer is valid. Any other invalid parameters would be
             // rejected by dwl_context_dmabuf_new safely. We check that the resulting dmabuf is
             // valid before filing it away.
@@ -466,7 +487,7 @@ impl DisplayT for DisplayWl {
                     descriptor.as_raw_descriptor(),
                     offset,
                     stride,
-                    modifiers,
+                    resolved_modifiers,
                     width,
                     height,
                     fourcc,
